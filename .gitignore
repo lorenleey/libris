@@ -1,0 +1,10 @@
+*.mdf
+*.ldf
+*.bak
+*.log
+.env
+secrets.sql
+*.key
+*.crt
+*.pem
+.vscode/
