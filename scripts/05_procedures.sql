@@ -18,14 +18,15 @@ BEGIN
     SET NOCOUNT ON;
 
     UPDATE b
-    SET IsAvailable = CASE
-                          WHEN EXISTS (SELECT 1
-                                       FROM dbo.Loans l
-                                       WHERE l.BookId = b.BookId
-                                         AND l.Status = 'Prestado')
-                          THEN 0
-                          ELSE 1
-                      END
+    SET IsAvailable = 
+        CASE WHEN EXISTS (
+            SELECT 1
+             FROM dbo.Loans l
+            WHERE l.BookId = b.BookId
+             AND l.Status = 'Prestado'
+             )  THEN 0
+                ELSE 1
+        END
     FROM dbo.Books b
     WHERE b.BookId IN (SELECT BookId FROM inserted
                        UNION
@@ -34,36 +35,79 @@ END;
 GO
 
 -- ---------------------------------------------------------------
--- PROCEDURE: registrar un préstamo (con TRY...CATCH y transacción)
--- Errores propios: 50001 socio inexistente, 50002 libro no disponible
+-- PROCEDURE: 
+-- @LoanId devuelve el identificador creado; es opcional.
+-- Errores:
+-- 50001: socio inexistente.
+-- 50002: libro inexistente o no disponible.e
 -- ---------------------------------------------------------------
 CREATE OR ALTER PROCEDURE dbo.usp_RegisterLoan
     @MemberId INT,
-    @BookId   INT
+    @BookId INT,
+    @LoanId INT = NULL OUTPUT
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    DECLARE @initialTranCount INT = @@TRANCOUNT;
+    SET @LoanId = NULL;
+
     BEGIN TRY
-        BEGIN TRANSACTION;
+    -- Iniciar una transacción propia o guardar un punto
+        -- dentro de la transacción del llamador.
+        IF @initialTranCount = 0
+        BEGIN
+            BEGIN TRANSACTION;
+        END
+        ELSE 
+        BEGIN 
+            SAVE TRANSACTION RegisterLoanSave;
+        END;
+
 
         IF NOT EXISTS (SELECT 1 FROM dbo.Members WHERE MemberId = @MemberId)
+        BEGIN 
             THROW 50001, N'El socio no existe.', 1;
+        END;
 
-        -- UPDLOCK/HOLDLOCK evita que dos sesiones presten el mismo libro a la vez
+         -- Mantener el bloqueo hasta terminar la transacción:
+        -- dos llamadas al procedimiento no pueden prestar
+        -- simultáneamente el mismo libro.
+
         IF NOT EXISTS (SELECT 1
                        FROM dbo.Books WITH (UPDLOCK, HOLDLOCK)
                        WHERE BookId = @BookId AND IsAvailable = 1)
+        BEGIN 
             THROW 50002, N'El libro no existe o no está disponible.', 1;
+        END;
 
         INSERT INTO dbo.Loans (BookId, MemberId, LoanDate, ReturnDate, Status)
         VALUES (@BookId, @MemberId, CAST(SYSDATETIME() AS DATE), NULL, 'Prestado');
 
-        COMMIT TRANSACTION;
+        SET @LoanId = CONVERT(INT, SCOPE_IDENTITY());
+
+        -- El trigger ya ha actualizado Books.IsAvailable
+        IF @initialTranCount = 0
+        BEGIN
+            COMMIT TRANSACTION;
+        END;
     END TRY
     BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION;
-        THROW;   -- relanza el error original
+        SET @LoanId = NULL;
+
+        IF @initialTranCount = 0
+        BEGIN
+            IF XACT_STATE() <> 0
+                ROLLBACK TRANSACTION;
+        END
+        ELSE IF XACT_STATE() = 1
+        BEGIN
+            ROLLBACK TRANSACTION RegisterLoanSave;
+        END;
+
+        -- Si la transacción externa está inutilizable
+        -- (XACT_STATE = -1), el llamador debe revertirla.
+        THROW;
     END CATCH;
 END;
 GO
@@ -78,7 +122,6 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    BEGIN TRY
         UPDATE dbo.Loans
         SET Status     = 'Terminado',
             ReturnDate = CAST(SYSDATETIME() AS DATE)
@@ -86,10 +129,9 @@ BEGIN
           AND Status = 'Prestado';
 
         IF @@ROWCOUNT = 0
+        BEGIN
             THROW 50003, N'El préstamo no existe o ya estaba devuelto.', 1;
-    END TRY
-    BEGIN CATCH
-        THROW;
-    END CATCH;
+        END;
+
 END;
 GO

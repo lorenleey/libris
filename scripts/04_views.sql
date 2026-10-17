@@ -22,11 +22,13 @@ SELECT b.BookId,
        b.Title,
        (SELECT STRING_AGG(a.FullName, N', ') WITHIN GROUP (ORDER BY a.FullName)
         FROM dbo.BookAuthors ba
-        JOIN dbo.Authors a ON a.AuthorId = ba.AuthorId
+        JOIN dbo.Authors a 
+        ON a.AuthorId = ba.AuthorId
         WHERE ba.BookId = b.BookId) AS Authors,
        (SELECT STRING_AGG(g.Name, N', ') WITHIN GROUP (ORDER BY g.Name)
         FROM dbo.BookGenres bg
-        JOIN dbo.Genres g ON g.GenreId = bg.GenreId
+        JOIN dbo.Genres g 
+        ON g.GenreId = bg.GenreId
         WHERE bg.BookId = b.BookId) AS Genres,
        b.PublishedYear,
        b.IsAvailable,

@@ -47,33 +47,118 @@ GO
 --    Todo en un solo bloque; al final se borra el préstamo de prueba
 --    para dejar los datos como estaban.
 -- ===============================================================
-DECLARE @bookId   INT = (SELECT BookId   FROM dbo.Books   WHERE Title     = N'Dune');
-DECLARE @memberId INT = (SELECT MemberId FROM dbo.Members WHERE LoginName = N'bruno');
 
-SELECT Title, IsAvailable AS Disponible_antes FROM dbo.Books WHERE BookId = @bookId;            -- 1
+IF @@TRANCOUNT <> 0
+    THROW 50010, N'Ejecuta la prueba sin una transacción abierta.', 1;
 
-EXEC dbo.usp_RegisterLoan @MemberId = @memberId, @BookId = @bookId;
+DECLARE @bookId   INT = (SELECT BookId  
+                         FROM dbo.Books  
+                          WHERE Title     = N'Dune');
 
-SELECT Title, IsAvailable AS Disponible_tras_prestar FROM dbo.Books WHERE BookId = @bookId;     -- 0 (lo hizo el trigger)
+DECLARE @memberId INT = (SELECT MemberId 
+                        FROM dbo.Members 
+                        WHERE LoginName = N'bruno');
+
+DECLARE @loanId INT = NULL;
+DECLARE @secondLoanId INT = NULL;
+DECLARE @expectedError BIT = 0;
+
+IF @bookId IS NULL OR @memberId IS NULL
+    THROW 50011, N'Faltan los datos de prueba: Dune o Bruno.', 1;
+
+IF NOT EXISTS (
+    SELECT 1 FROM dbo.Books
+    WHERE BookId = @bookId AND IsAvailable = 1
+)
+OR EXISTS (
+    SELECT 1 FROM dbo.Loans
+    WHERE BookId = @bookId AND Status = 'Prestado'
+)
+    THROW 50012, N'Dune debe estar disponible antes de la prueba.', 1;
+
+BEGIN TRY
+    SELECT Title, IsAvailable AS Disponible_antes 
+    FROM dbo.Books 
+    WHERE BookId = @bookId;            -- 1
+
+    -- crear el préstamo y recibir su ID
+    EXEC dbo.usp_RegisterLoan 
+    @MemberId = @memberId, 
+    @BookId = @bookId,
+    @LoanId = @loanId OUTPUT;
+
+    IF @loanId IS NULL
+        THROW 50013, N'El procedimiento no devolvió el ID.', 1;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM dbo.Books
+        WHERE BookId = @bookId AND IsAvailable = 0
+    )
+        THROW 50014, N'El trigger no marcó el libro como ocupado.', 1;
+
+    SELECT @loanId AS PrestamoCreado,
+           Title,
+           IsAvailable AS Disponible_tras_prestar
+    FROM dbo.Books
+    WHERE BookId = @bookId;
 
 -- Segundo intento: debe fallar con el error 50002
 BEGIN TRY
-    EXEC dbo.usp_RegisterLoan @MemberId = @memberId, @BookId = @bookId;
+    EXEC dbo.usp_RegisterLoan 
+    @MemberId = @memberId, 
+    @BookId = @bookId,
+    @LoanId = @secondLoanId OUTPUT;
 END TRY
 BEGIN CATCH
-    SELECT ERROR_NUMBER() AS Numero, ERROR_MESSAGE() AS Mensaje;
+ IF ERROR_NUMBER() <> 50002
+            THROW;
+
+        SET @expectedError = 1;
+
+        SELECT ERROR_NUMBER() AS Numero,
+               ERROR_MESSAGE() AS Mensaje;
 END CATCH;
 
-DECLARE @loanId INT = (SELECT TOP (1) LoanId
-                       FROM dbo.Loans
-                       WHERE BookId = @bookId AND Status = 'Prestado');
+    IF @expectedError = 0
+        THROW 50015, N'El segundo préstamo debería haber fallado.', 1;
 
-EXEC dbo.usp_ReturnLoan @LoanId = @loanId;
 
-SELECT Title, IsAvailable AS Disponible_tras_devolver FROM dbo.Books WHERE BookId = @bookId;    -- 1
+-- Devolver exactamente el préstamo creado.
+    EXEC dbo.usp_ReturnLoan @LoanId = @loanId;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM dbo.Loans
+        WHERE LoanId = @loanId
+          AND Status = 'Terminado'
+          AND ReturnDate IS NOT NULL
+    )
+        THROW 50016, N'El préstamo no se ha devuelto correctamente.', 1;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM dbo.Books
+        WHERE BookId = @bookId AND IsAvailable = 1
+    )
+        THROW 50017, N'El trigger no ha liberado el libro.', 1;
+
+    SELECT Title, IsAvailable AS Disponible_tras_devolver
+    FROM dbo.Books
+    WHERE BookId = @bookId;
+
+    -- El DELETE también dispara el trigger.
+    DELETE FROM dbo.Loans
+    WHERE LoanId = @loanId;
+
+    SELECT N'Prueba correcta; préstamo de prueba eliminado.'
+           AS Resultado;
+END TRY
 
 -- Limpieza (el DELETE también activa el trigger)
-DELETE FROM dbo.Loans WHERE LoanId = @loanId;
+BEGIN CATCH
+    DELETE FROM dbo.Loans 
+    WHERE LoanId = @loanId;
+
+    THROW;
+END CATCH;
 GO
 
 -- ===============================================================
