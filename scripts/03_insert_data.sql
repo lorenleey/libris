@@ -4,28 +4,46 @@
    12 valoraciones. Los ISBN son ficticios (solo de ejemplo).
    Las relaciones se hacen por nombre, no por ID, para que el
    script no dependa del orden de los IDENTITY.
+   Inserta solo datos que faltan; conserva registros ya existentes.
+   Ejecutar en una sola sesión, sin otras cargas simultáneas.
    ============================================================== */
 USE Libris;
 GO
+SET NOCOUNT ON;
+SET XACT_ABORT ON;
+
+BEGIN TRY
+BEGIN TRANSACTION;
 
 -- ---------------------------------------------------------------
 -- Géneros y autores
 -- ---------------------------------------------------------------
 INSERT INTO dbo.Genres (Name)
-VALUES (N'Ciencia ficción'), (N'Fantasía'), (N'Misterio'), (N'Novela histórica'),
-       (N'Distopía'), (N'Clásico'), (N'Aventura');
+SELECT v.Name
+FROM (VALUES (N'Ciencia ficción'), (N'Fantasía'), (N'Misterio'), (N'Novela histórica'),
+       (N'Distopía'), (N'Clásico'), (N'Aventura')) AS v(Name)
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Genres AS existing
+    WHERE existing.Name = v.Name
+);
 
 INSERT INTO dbo.Authors (FullName)
-VALUES (N'Frank Herbert'), (N'Isaac Asimov'), (N'Ursula K. Le Guin'), (N'William Gibson'),
+SELECT v.FullName
+FROM (VALUES (N'Frank Herbert'), (N'Isaac Asimov'), (N'Ursula K. Le Guin'), (N'William Gibson'),
        (N'George Orwell'), (N'Ray Bradbury'), (N'Umberto Eco'), (N'Agatha Christie'),
        (N'Stieg Larsson'), (N'J. R. R. Tolkien'), (N'Gabriel García Márquez'),
-       (N'Miguel de Cervantes'), (N'Carlos Ruiz Zafón');
+       (N'Miguel de Cervantes'), (N'Carlos Ruiz Zafón')) AS v(FullName)
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Authors AS existing
+    WHERE existing.FullName = v.FullName
+);
 
 -- ---------------------------------------------------------------
 -- Libros (sinopsis redactadas con palabras propias)
 -- ---------------------------------------------------------------
 INSERT INTO dbo.Books (Title, Isbn, Synopsis, PublishedYear)
-VALUES
+SELECT v.Title, v.Isbn, v.Synopsis, v.PublishedYear
+FROM (VALUES
 (N'Dune', '9780000000001',
  N'Un joven noble debe sobrevivir en el planeta desértico Arrakis, donde se disputa la especia más valiosa del universo en una guerra de familias, política y religión.', 1965),
 (N'Fundación', '9780000000002',
@@ -55,7 +73,11 @@ VALUES
 (N'Don Quijote de la Mancha', '9780000000014',
  N'Un hidalgo enloquecido por los libros de caballerías sale a recorrer España junto a su escudero para vivir aventuras heroicas.', 1605),
 (N'La sombra del viento', '9780000000015',
- N'En la Barcelona de posguerra, un niño descubre un libro olvidado y se adentra en el misterio de su autor desaparecido.', 2001);
+ N'En la Barcelona de posguerra, un niño descubre un libro olvidado y se adentra en el misterio de su autor desaparecido.', 2001)) AS v(Title, Isbn, Synopsis, PublishedYear)
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Books AS existing
+    WHERE existing.Isbn = v.Isbn
+);
 
 -- ---------------------------------------------------------------
 -- Relaciones libro-autor y libro-género (por nombre)
@@ -80,7 +102,11 @@ FROM (VALUES
     (N'La sombra del viento', N'Carlos Ruiz Zafón')
 ) AS v(Title, Author)
 JOIN dbo.Books   b ON b.Title    = v.Title
-JOIN dbo.Authors a ON a.FullName = v.Author;
+JOIN dbo.Authors a ON a.FullName = v.Author
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.BookAuthors AS existing
+    WHERE existing.BookId = b.BookId AND existing.AuthorId = a.AuthorId
+);
 
 INSERT INTO dbo.BookGenres (BookId, GenreId)
 SELECT b.BookId, g.GenreId
@@ -102,16 +128,25 @@ FROM (VALUES
     (N'La sombra del viento', N'Misterio'), (N'La sombra del viento', N'Novela histórica')
 ) AS v(Title, Genre)
 JOIN dbo.Books  b ON b.Title = v.Title
-JOIN dbo.Genres g ON g.Name  = v.Genre;
+JOIN dbo.Genres g ON g.Name  = v.Genre
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.BookGenres AS existing
+    WHERE existing.BookId = b.BookId AND existing.GenreId = g.GenreId
+);
 
 -- ---------------------------------------------------------------
 -- Socios (LoginName será el usuario de BD en la fase de seguridad)
 -- ---------------------------------------------------------------
 INSERT INTO dbo.Members (FullName, Email, LoginName)
-VALUES (N'Ana López',   N'ana@example.com',   N'ana'),
+SELECT v.FullName, v.Email, v.LoginName
+FROM (VALUES (N'Ana López',   N'ana@example.com',   N'ana'),
        (N'Bruno Martín', N'bruno@example.com', N'bruno'),
        (N'Carla Ruiz',  N'carla@example.com',  N'carla'),
-       (N'David Soto',  N'david@example.com',  N'david');
+       (N'David Soto',  N'david@example.com',  N'david')) AS v(FullName, Email, LoginName)
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Members AS existing
+    WHERE existing.LoginName = v.LoginName
+);
 
 -- ---------------------------------------------------------------
 -- Préstamos: cada socio tiene un gusto distinto
@@ -136,13 +171,20 @@ FROM (VALUES
     (N'David Soto',   N'Fahrenheit 451',                    '2026-08-20', '2026-08-28', 'Terminado')
 ) AS v(Member, Title, LoanDate, ReturnDate, Status)
 JOIN dbo.Members m ON m.FullName = v.Member
-JOIN dbo.Books   b ON b.Title    = v.Title;
+JOIN dbo.Books   b ON b.Title    = v.Title
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Loans AS existing
+    WHERE existing.BookId = b.BookId AND existing.MemberId = m.MemberId
+      AND existing.LoanDate = CONVERT(date, v.LoanDate)
+);
 
--- Los libros con préstamo abierto no están disponibles
--- (en la fase de T-SQL lo mantendrá un trigger)
-UPDATE dbo.Books
-SET IsAvailable = 0
-WHERE Title IN (N'Yo, robot', N'Los hombres que no amaban a las mujeres');
+-- Recalcular la disponibilidad a partir del estado actual de los préstamos.
+UPDATE b
+SET IsAvailable = CASE WHEN EXISTS (
+    SELECT 1 FROM dbo.Loans AS l
+    WHERE l.BookId = b.BookId AND l.Status = 'Prestado'
+) THEN 0 ELSE 1 END
+FROM dbo.Books AS b;
 
 -- ---------------------------------------------------------------
 -- Valoraciones (solo de libros terminados; incluye una baja)
@@ -164,7 +206,18 @@ FROM (VALUES
     (N'David Soto',   N'Fahrenheit 451',                 4)
 ) AS v(Member, Title, Score)
 JOIN dbo.Members m ON m.FullName = v.Member
-JOIN dbo.Books   b ON b.Title    = v.Title;
+JOIN dbo.Books   b ON b.Title    = v.Title
+WHERE NOT EXISTS (
+    SELECT 1 FROM dbo.Ratings AS existing
+    WHERE existing.BookId = b.BookId AND existing.MemberId = m.MemberId
+);
+
+COMMIT TRANSACTION;
+END TRY
+BEGIN CATCH
+    IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+    THROW;
+END CATCH;
 GO
 
 -- ---------------------------------------------------------------
@@ -179,5 +232,6 @@ UNION ALL SELECT 'BookAuthors', COUNT(*) FROM dbo.BookAuthors
 UNION ALL SELECT 'BookGenres',  COUNT(*) FROM dbo.BookGenres
 UNION ALL SELECT 'Members',     COUNT(*) FROM dbo.Members
 UNION ALL SELECT 'Loans',       COUNT(*) FROM dbo.Loans
-UNION ALL SELECT 'Ratings',     COUNT(*) FROM dbo.Ratings;
+UNION ALL SELECT 'Ratings',     COUNT(*) FROM dbo.Ratings
+UNION ALL SELECT 'SearchHistory', COUNT(*) FROM dbo.SearchHistory;
 GO
