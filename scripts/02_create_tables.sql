@@ -41,7 +41,7 @@ CREATE TABLE dbo.Books
                                 CONSTRAINT CK_Books_Year CHECK (PublishedYear BETWEEN 1000 AND 2100),
     IsAvailable   BIT           NOT NULL CONSTRAINT DF_Books_IsAvailable DEFAULT (1),
     EmbeddingText NVARCHAR(MAX) NULL,   -- texto preparado (título + autor + géneros + sinopsis); se rellena en la fase de embeddings
-    Embedding     VECTOR(384)   NULL    -- 384 = all-minilm. Si cambias de modelo, cambia este número
+    Embedding     VECTOR(1024)   NULL    -- 384 = all-minilm. Si cambias de modelo, cambia este número
 );
 END;
 

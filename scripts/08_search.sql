@@ -89,7 +89,7 @@ BEGIN
     SET NOCOUNT ON;
 
     -- Embedding de la pregunta con el mismo modelo que los libros
-    DECLARE @q VECTOR(384) = AI_GENERATE_EMBEDDINGS(@Query USE MODEL OllamaEmbeddings);
+    DECLARE @q VECTOR(1024) = AI_GENERATE_EMBEDDINGS(@Query USE MODEL OllamaBgeM3);
 
     IF @q IS NULL
         THROW 50020, N'No se pudo generar el embedding de la consulta (¿Ollama o Caddy cerrados?).', 1;
@@ -180,7 +180,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @q VECTOR(384) = AI_GENERATE_EMBEDDINGS(@Query USE MODEL OllamaEmbeddings);
+    DECLARE @q VECTOR(1024) = AI_GENERATE_EMBEDDINGS(@Query USE MODEL OllamaBgeM3);
 
     IF @q IS NULL
         THROW 50020, N'No se pudo generar el embedding de la consulta (¿Ollama o Caddy cerrados?).', 1;

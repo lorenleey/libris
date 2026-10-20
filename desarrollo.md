@@ -12,3 +12,8 @@ $r.embeddings[0].Count
 ``` 
 
 Para esto fue necesario transformar nuestros embeddings de VECTOR(384) a VECTOR(1024) que se pudo llevar a cabo ejecutando (ai/01_compare_embedding_models.sql)
+
+Ficheros actualizados: `02_create_tables.sql`
+                        `03_generate_embeddings_bge_m3.sql` 
+                        
+
