@@ -46,8 +46,7 @@ GO
 SELECT BookId, EmbeddingText
 FROM dbo.Books
 ORDER BY BookId;
--- Esperado: 15 filas con el texto completo (captura para el informe)
-GO
+-- Esperado: 15 filas con el texto completo 
 
 -- ---------------------------------------------------------------
 -- PASO 3. Generar y guardar los embeddings (solo los que faltan)
@@ -91,7 +90,9 @@ GO
 -- PASO 5. Prueba de sentido: libros más parecidos a "Dune"
 --         (el primero será el propio Dune con distancia 0)
 -- ---------------------------------------------------------------
-DECLARE @dune VECTOR(384) = (SELECT Embedding FROM dbo.Books WHERE Title = N'Dune');
+DECLARE @dune VECTOR(384) = (SELECT Embedding 
+                              FROM dbo.Books 
+                              WHERE Title = N'Dune');
 
 SELECT TOP (6)
        Title,
