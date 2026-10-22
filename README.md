@@ -1,384 +1,222 @@
-# Libris
+# Libris · biblioteca inteligente
 
-**Libris** es un proyecto desarrollado con **SQL Server 2025** para crear una biblioteca inteligente capaz de realizar búsquedas semánticas, búsquedas Full-Text y recomendaciones personalizadas a partir de los gustos e historial de cada usuario.
+Libris permite encontrar libros describiendo lo que apetece leer, sin conocer el título exacto. Combina una biblioteca en **SQL Server 2025**, búsquedas por palabras y por significado, recomendaciones por historial y un chat que responde usando información del catálogo.
 
-El proyecto se plantea como mini proyecto para trabajar contenidos de **DP-800: SQL AI Developer Associate**, intentando dejar primero un **Nivel 2 completamente funcional** y, después, ampliar la solución a **Nivel 3 con RAG**.
+Mini proyecto de **DP-800 · nivel 3**, desarrollado y probado en local. Incluye RAG e interfaz con Streamlit.
 
-## Objetivo
+![Interfaz de Libris](img/fase9-apariencia-pagina-desplegada-streamlit.png)
 
-La idea principal es que un usuario no tenga que conocer el título exacto de un libro para encontrar algo que le interese.
+## Qué hace
 
-Por ejemplo:
+- Gestiona libros, autores, géneros, socios, préstamos y valoraciones.
+- Busca por palabras con Full-Text en español y por significado con embeddings.
+- Combina rankings mediante RRF y permite personalizar las búsquedas.
+- Recupera libros y genera una respuesta con un modelo local, mostrando las fuentes.
+- Incluye pruebas de seguridad, mediciones de rendimiento y capturas.
 
-> "Quiero una novela de ciencia ficción sobre política y poder en el espacio"
+El conjunto ampliado utilizado en las pruebas tiene **515 libros y 54 socios**, con los 515 embeddings generados. Los socios añadidos para las mediciones son ficticios.
 
-Libris podrá transformar esa consulta en un embedding, compararlo con los embeddings almacenados de los libros y devolver los resultados más relacionados por significado.
+## Arquitectura
 
-Además, el ranking podrá tener en cuenta información del propio usuario, como libros prestados y valoraciones anteriores.
-
-## Arquitectura prevista
-
-```text
-                         Usuario
-                            |
-                     consulta en texto
-                            |
-                            v
-                     SQL Server 2025
-                  /                     \
-                 /                       \
-        Full-Text Search            Vector Search
-                 \                       /
-                  \                     /
-                   ---- Hybrid Search ---
-                            |
-                           RRF
-                            |
-                   Personalización
-                            |
-                     ranking final
-                            |
-                +-----------+-----------+
-                |                       |
-          resultados                 contexto RAG
-                                        |
-                                        v
-                                      Caddy
-                                        |
-                                     Ollama
-                                        |
-                                        v
-                                respuesta del LLM
+```mermaid
+flowchart TD
+    UI["Interfaz Streamlit"] --> SQL["SQL Server 2025"]
+    SSMS["Pruebas en SSMS"] --> SQL
+    SQL --> DATA["Tablas, sinopsis y vectores"]
+    SQL --> SEARCH["Búsqueda textual, vectorial e híbrida"]
+    SQL -->|"HTTPS · puerto 11435"| CADDY["Caddy"]
+    CADDY -->|"HTTP · puerto 11434"| OLLAMA["Ollama"]
+    OLLAMA --> EMB["BGE-M3 · embeddings"]
+    OLLAMA --> CHAT["Qwen2.5:3b · respuestas"]
 ```
 
-Para la generación de embeddings se utiliza un modelo local ejecutado con Ollama:
+**El chat actual recupera por distancia coseno exacta.** La búsqueda híbrida con RRF y la personalización son funciones independientes: no se incorporan automáticamente al RAG.
 
-```text
-SQL Server 2025
-      |
-      | HTTPS
-      v
-    Caddy
-      |
-      | HTTP
-      v
-    Ollama
-      |
-      v
- all-minilm
-```
-
-## Entorno validado
-
-Actualmente se ha comprobado correctamente:
-
-- SQL Server 2025.
-- Base de datos con nivel de compatibilidad **170**.
-- Full-Text Search instalado.
-- Idioma español disponible para Full-Text Search.
-- Ollama funcionando en local.
-- Modelo `all-minilm`.
-- Embeddings de **384 dimensiones**.
-- Caddy funcionando como proxy HTTPS entre SQL Server y Ollama.
-- Comunicación desde SQL Server mediante `sp_invoke_external_rest_endpoint`.
-- Creación de un `EXTERNAL MODEL` conectado a Ollama.
-- Generación de embeddings desde T-SQL con `AI_GENERATE_EMBEDDINGS`.
-
-El modelo actual utiliza vectores:
-
-```sql
-VECTOR(384)
-```
-
-## Modelo de datos previsto
-
-La base de datos tendrá como mínimo las siguientes entidades:
-
-| Tabla | Función |
-| --- | --- |
-| `Books` | Catálogo principal de libros y embedding |
-| `Authors` | Información de autores |
-| `BookAuthors` | Relación N:M entre libros y autores |
-| `Genres` | Géneros disponibles |
-| `BookGenres` | Relación N:M entre libros y géneros |
-| `Members` | Usuarios/socios de la biblioteca |
-| `Loans` | Historial de préstamos |
-| `Ratings` | Valoraciones realizadas por los usuarios |
-
-El embedding de cada libro se generará a partir de información textual como:
-
-```text
-Título
-Autor
-Género
-Sinopsis
-```
-
-## Funcionalidades principales
-
-### Diseño y desarrollo SQL
-
-Se implementarán:
-
-- PRIMARY KEY y FOREIGN KEY.
-- CHECK y otras constraints necesarias.
-- Índices.
-- Views.
-- Stored Procedures.
-- Functions.
-- Triggers.
-- Datos de prueba suficientes para probar la búsqueda y las recomendaciones.
-
-### T-SQL avanzado
-
-El proyecto incluirá ejemplos de:
-
-- CTE.
-- Window Functions.
-- JSON.
-- Expresiones regulares.
-- Fuzzy String Matching.
-- Consultas correlacionadas cuando tenga sentido dentro del proyecto.
-
-El fuzzy matching se utilizará principalmente para tolerar errores al buscar autores o títulos.
-
-### Búsqueda Full-Text
-
-Full-Text Search permitirá buscar por contenido textual usando las capacidades lingüísticas de SQL Server.
-
-Se configurará el idioma español para las columnas indexadas.
-
-### Búsqueda vectorial
-
-Los libros almacenarán un embedding generado mediante Ollama y `AI_GENERATE_EMBEDDINGS`.
-
-La búsqueda principal se realizará inicialmente con:
-
-```sql
-VECTOR_DISTANCE('cosine', ...)
-```
-
-Esto permite hacer una búsqueda exacta sobre un catálogo pequeño sin depender de funcionalidades preview.
-
-Como ampliación se estudiará:
-
-- `CREATE VECTOR INDEX`.
-- `VECTOR_SEARCH`.
-
-Estas funciones requieren activar `PREVIEW_FEATURES` en SQL Server 2025, por lo que no forman parte del mínimo necesario para que Libris funcione.
-
-### Búsqueda híbrida
-
-Libris combinará dos rankings:
-
-```text
-Full-Text Search
-       +
-Vector Search
-       |
-       v
-      RRF
-       |
-       v
-ranking combinado
-```
-
-Para fusionarlos se utilizará **Reciprocal Rank Fusion (RRF)** en lugar de sumar directamente las puntuaciones de Full-Text y distancia vectorial, ya que ambas utilizan escalas diferentes.
-
-La idea será trabajar por posición:
-
-```text
-RRF = 1 / (k + posición)
-```
-
-y combinar posteriormente los rankings obtenidos.
-
-### Personalización
-
-Las recomendaciones podrán utilizar como señales:
-
-- Libros prestados anteriormente.
-- Valoraciones de cada usuario.
-- Géneros mejor valorados.
-- Similitud con libros que el usuario ha puntuado positivamente.
-
-Se excluirán de las recomendaciones los libros que corresponda según el caso y se utilizarán CTE y Window Functions para construir el ranking personalizado.
-
-## Seguridad
-
-Se implementarán al menos estos mecanismos:
-
-- Roles y permisos mediante `GRANT`, `DENY` y `REVOKE`.
-- Row-Level Security para que cada socio pueda consultar únicamente sus propios préstamos.
-- Dynamic Data Masking para proteger información como el email.
-
-Las diferencias entre usuarios se probarán utilizando `EXECUTE AS USER` y `REVERT`.
-
-## IA asistiendo al desarrollo
-
-Durante el desarrollo se utilizará Copilot como apoyo para tareas como:
-
-- Proponer consultas.
-- Revisar T-SQL.
-- Generar datos de prueba.
-- Proponer índices.
-- Detectar errores.
-- Ayudar con documentación.
-
-Las pruebas relevantes se documentarán indicando:
-
-1. Prompt utilizado.
-2. Respuesta de la IA.
-3. Qué parte se aceptó.
-4. Qué parte se corrigió.
-5. Cómo se comprobó el resultado.
-
-## RAG
-
-El objetivo avanzado del proyecto es incorporar una pequeña solución RAG.
-
-El flujo previsto es:
-
-```text
-Pregunta
-   |
-   v
-AI_GENERATE_EMBEDDINGS
-   |
-   v
-SQL Server
-   |
-   v
-recuperación de libros relevantes
-   |
-   v
-construcción del contexto
-   |
-   v
-Caddy
-   |
-   v
-LLM local en Ollama
-   |
-   v
-respuesta final
-```
-
-La recuperación de documentos y la construcción del contexto se podrán demostrar desde SQL Server aunque finalmente no se desarrolle una interfaz gráfica.
-
-La interfaz tipo chat queda como ampliación opcional.
-
-## Nivel del proyecto
-
-### Nivel 2 - objetivo mínimo
-
-- Diseño de base de datos.
-- T-SQL.
-- Seguridad.
-- Embeddings.
-- Tipo `VECTOR`.
-- Búsqueda semántica.
-- Full-Text Search.
-- Búsqueda híbrida.
-- Personalización.
-
-### Nivel 3 - objetivo final
-
-Además de lo anterior:
-
-- Retrieval-Augmented Generation (RAG).
-- Recuperación de contexto desde SQL Server.
-- LLM local mediante Ollama.
-- Respuesta generada utilizando los datos recuperados.
-
-## Fases
-
-### Fase 1 - entorno
-
-Configuración y validación de SQL Server 2025, Full-Text Search, Ollama, Caddy y el modelo de embeddings.
-
-**Estado:** completada.
-
-### Fase 2 - base de datos
-
-Creación del modelo relacional, tablas, relaciones, constraints y datos de prueba.
-
-### Fase 3 - objetos T-SQL
-
-Creación de views, procedures, functions, triggers y consultas avanzadas.
-
-### Fase 4 - seguridad
-
-Configuración de usuarios, roles, permisos, RLS y Dynamic Data Masking.
-
-### Fase 5 - embeddings y búsqueda semántica
-
-Generación y almacenamiento de embeddings en SQL Server y búsqueda mediante distancia coseno.
-
-### Fase 6 - búsqueda híbrida y recomendaciones
-
-Implementación de Full-Text Search, RRF y personalización por usuario.
-
-### Fase 7 - RAG
-
-Recuperación de libros relevantes, construcción del contexto y llamada a un LLM local.
-
-### Fase 8 - pruebas y documentación
-
-Pruebas reproducibles, capturas, README, informe técnico y presentación.
-
-## Estructura prevista del repositorio
-
-```text
-libris/
-|
-├── README.md
-├── database/
-│   ├── 01_create_database.sql
-│   ├── 02_create_tables.sql
-│   ├── 03_insert_data.sql
-│   ├── 04_views.sql
-│   ├── 05_functions.sql
-│   ├── 06_procedures.sql
-│   ├── 07_triggers.sql
-│   ├── 08_fulltext.sql
-│   ├── 09_security.sql
-│   └── 10_indexes.sql
-|
-├── ai/
-│   ├── 01_external_model.sql
-│   ├── 02_embeddings.sql
-│   ├── 03_vector_search.sql
-│   ├── 04_hybrid_search.sql
-│   └── 05_rag.sql
-|
-├── data/
-├── tests/
-├── docs/
-│   └── ai-assisted-log.md
-|
-└── setup/
-    └── Caddyfile
-```
-
-La estructura puede cambiar durante el desarrollo según las necesidades reales del proyecto.
+SQL Server prepara el contexto y llama al modelo. Python recoge la pregunta y presenta los resultados. Caddy permite que SQL Server se comunique por HTTPS con Ollama.
 
 ## Tecnologías
 
-- SQL Server 2025
-- SQL Server Management Studio
-- T-SQL
-- Full-Text Search
-- VECTOR
-- Ollama
-- all-minilm
-- Caddy
-- Git
-- GitHub
-- GitHub Copilot / Copilot en SSMS
+| Herramienta | Uso |
+| --- | --- |
+| SQL Server 2025 y T-SQL | Datos, seguridad, búsquedas y lógica del RAG |
+| SSMS | Ejecución y comprobación de scripts |
+| Ollama | Ejecución local de modelos |
+| BGE-M3 | Embeddings de 1024 dimensiones |
+| Qwen2.5:3b | Redacción de respuestas |
+| Caddy | Proxy HTTPS para Ollama |
+| Python, Streamlit, pyodbc y python-dotenv | Interfaz y conexión a SQL Server |
+| Git y GitHub | Historial y entrega |
 
-## Estado actual
+El primer modelo probado fue `all-minilm`, de 384 dimensiones. Se conserva su comparación como parte del desarrollo; **la versión actual utiliza BGE-M3**.
 
-La conexión SQL Server → Caddy → Ollama ya ha sido validada y SQL Server puede generar embeddings correctamente mediante el modelo externo.
+## Base de datos
 
-El siguiente paso del proyecto es comenzar con el **modelo relacional y la creación de las tablas de Libris**.
+| Tabla | Contenido |
+| --- | --- |
+| `Books` | Ficha, sinopsis, disponibilidad, texto de entrada y embedding |
+| `Authors` y `BookAuthors` | Autores y relación de varios autores por libro |
+| `Genres` y `BookGenres` | Géneros y relación de varios géneros por libro |
+| `Members` | Socios |
+| `Loans` | Préstamos y devoluciones |
+| `Ratings` | Valoraciones |
+| `SearchHistory` | Consultas de las búsquedas textual, vectorial e híbrida |
+
+Los préstamos y las valoraciones relacionan a cada socio con los libros. El RAG consulta fichas del catálogo, no los datos personales de los socios.
+
+## Instalación en local
+
+### 1. Preparar el equipo
+
+Necesitas Windows, SQL Server 2025 con Full-Text Search, SSMS, Python, Git, Ollama, Caddy y **ODBC Driver 18 for SQL Server**. El controlador ODBC se instala aparte de las dependencias Python.
+
+```powershell
+git clone https://github.com/lorenleey/libris.git
+cd libris
+ollama pull bge-m3
+ollama pull qwen2.5:3b
+```
+
+### 2. Preparar HTTPS y el modelo externo
+
+Configura Caddy para reenviar las peticiones de `https://localhost:11435` a Ollama. Como referencia, crea un archivo local llamado `Caddyfile`:
+
+```caddyfile
+https://localhost:11435 {
+    tls internal
+    reverse_proxy localhost:11434
+}
+```
+
+Arranca Caddy desde la carpeta de ese archivo:
+
+```powershell
+caddy run --config .\Caddyfile
+```
+
+El certificado debe ser de confianza también para el servicio de SQL Server. Comprueba el endpoint antes de continuar:
+
+```powershell
+Invoke-RestMethod -Uri https://localhost:11435/api/embed -Method Post -ContentType 'application/json' -Body '{"model":"bge-m3","input":"novela de aventuras"}'
+```
+
+En SSMS, usa [scripts/00_validacion_entorno.sql](scripts/00_validacion_entorno.sql) **por secciones** para comprobar versión, Full-Text y habilitar las llamadas REST. Ese archivo conserva las pruebas iniciales de MiniLM: no es un instalador completo para la versión final.
+
+Para la versión actual, registra `OllamaBgeM3` y comprueba sus 1024 dimensiones con los **pasos 1 y 2** de [ai/02.0_compare_embedding_models.sql](ai/02.0_compare_embedding_models.sql). No repitas el `CREATE EXTERNAL MODEL` si ya existe. La comparación completa requiere el antiguo catálogo con vectores MiniLM.
+
+### 3. Crear la biblioteca
+
+Ejecuta en SSMS, en este orden:
+
+| Orden | Archivo | Qué prepara |
+| --- | --- | --- |
+| 1 | [01_create_database.sql](scripts/01_create_database.sql) | Base de datos |
+| 2 | [02_create_tables.sql](scripts/02_create_tables.sql) | Tablas, relaciones e índices; ya usa VECTOR(1024) |
+| 3 | [03_insert_data.sql](scripts/03_insert_data.sql) | Datos iniciales |
+| 4 | [04_views.sql](scripts/04_views.sql) | Vistas y funciones de apoyo |
+| 5 | [05_procedures.sql](scripts/05_procedures.sql) | Préstamos, devoluciones y trigger |
+| 6 | [06_security.sql](scripts/06_security.sql) | Roles, permisos, RLS y enmascaramiento |
+| 7 | [07_fulltext.sql](scripts/07_fulltext.sql) | Índice de búsqueda en español |
+| 8 | [01_generate_embeddings.sql](ai/01_generate_embeddings.sql) | Texto y embeddings del catálogo inicial |
+| 9 | [08_search.sql](scripts/08_search.sql) | Búsquedas y recomendaciones |
+| 10 | [03_rag.sql](ai/03_rag.sql) | Recuperación de contexto y generación |
+
+Para ampliar el catálogo como en las pruebas:
+
+1. Ejecuta [09_ampliar_libris_500_libros_50_socios.sql](scripts/09_ampliar_libris_500_libros_50_socios.sql).
+2. Repite [10_generar_embeddings_lotes.sql](scripts/10_generar_embeddings_lotes.sql) hasta que `Pendientes` sea 0. Actualmente procesa hasta 50 libros por ejecución.
+3. Comprueba cantidades y dimensiones con la primera parte de [11_verificar_y_medir.sql](scripts/11_verificar_y_medir.sql).
+
+La ampliación incorpora 500 fichas de libros con su referencia de origen en el propio script, más 50 socios ficticios y actividad de prueba. La base inicial aporta 15 libros y 4 socios.
+
+**Si partes de la versión antigua con VECTOR(384)**, utiliza [02.1_migrate_to_bge_m3.sql](ai/02.1_migrate_to_bge_m3.sql) antes de regenerar los vectores. Este archivo elimina los embeddings antiguos: no es necesario en una instalación nueva que ya tiene VECTOR(1024). Algunos comentarios de los scripts conservan nombres antiguos; los enlaces de esta guía corresponden a los archivos actuales.
+
+### 4. Abrir la interfaz
+
+Desde la raíz del repositorio:
+
+```powershell
+Copy-Item env.example .env
+python -m pip install -r requirements.txt
+```
+
+Edita `.env`. Para SQL Server local con autenticación de Windows:
+
+```dotenv
+SQL_CONN_STRING=DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost;DATABASE=Libris;Trusted_Connection=yes;TrustServerCertificate=yes;
+LIBRIS_CHAT_MODEL=qwen2.5:3b
+```
+
+Si en SSMS utilizas otro nombre de servidor, cambia `SERVER` por ese valor. Conserva `.streamlit/config.toml` para aplicar el tema.
+
+```powershell
+python -m streamlit run app.py
+```
+
+Abre la dirección local que indique la terminal y mantén Ollama y Caddy en marcha. `.env` está excluido de Git; `env.example` es la plantilla pública.
+
+## Ejemplos y comprobaciones
+
+```sql
+USE Libris;
+GO
+EXEC dbo.usp_SearchBooksText @Query = N'fantasía', @Top = 5;
+
+EXEC dbo.usp_SearchBooksSemantic
+    @Query = N'una historia sobre empezar de nuevo', @Top = 5;
+
+EXEC dbo.usp_SearchBooksHybrid
+    @Query = N'viajes y otros mundos', @Top = 5;
+
+DECLARE @respuesta NVARCHAR(MAX);
+EXEC dbo.usp_AskLibris
+    @Question = N'Recomiéndame un libro de terror y dime su autor',
+    @Answer = @respuesta OUTPUT,
+    @ShowEvidence = 1;
+```
+
+En una prueba desde la interfaz, Libris recomendó **El espejo del diablo**, de Miguel Martinez Saez, y el autor se comprobó también en SQL.
+
+![Recomendación con sus fuentes](img/fase9-prueba2.png)
+
+Los scripts de `tests/` cubren objetos SQL, seguridad, búsquedas y RAG. Ejecuta las pruebas por bloques y revisa sus resultados. [prueba_final.sql](tests/prueba_final.sql) comprueba el volumen, los embeddings, la disponibilidad y una llamada completa al chat.
+
+## Requisitos DP-800 cubiertos
+
+| Bloque | Implementación y evidencia |
+| --- | --- |
+| A · Diseño y T-SQL | Tablas relacionadas, claves, restricciones, índices, vistas, funciones, procedimientos y trigger; [tests de fase 3](tests/fase3_tests.sql) |
+| B · Desarrollo con IA | Apoyo de ChatGPT, decisiones y correcciones documentadas en [desarrollo.md](desarrollo.md) |
+| C · Seguridad | Roles, permisos, RLS y enmascaramiento; [tests de fase 4](tests/fase4_tests.sql) |
+| D · Optimización | Cinco parejas de mediciones y equivalencia para un socio; resultados y limitaciones en [desarrollo.md](desarrollo.md) |
+| E · Embeddings | BGE-M3, texto de las fichas y VECTOR(1024) |
+| F · Intelligent Search | Full-Text, distancia coseno, RRF y afinidad; [tests de fase 6](tests/fase6_tests.sql) |
+| G · RAG | Pregunta, fuentes, contexto y respuesta visibles; [tests de fase 7](tests/fase7_tests.sql) e interfaz |
+
+En las cinco mediciones locales, la alternativa de afinidad redujo la mediana del tiempo de **1834 a 985 ms** y la mediana de CPU de **1250 a 125 ms**. La definición de `usp_TestMemberAffinity` aún no está incluida en el repositorio: los scripts 11 y 12 la requieren para repetir esa comparación. Las búsquedas publicadas siguen usando la función original.
+
+## Organización del repositorio
+
+| Ruta | Contenido |
+| --- | --- |
+| `scripts/` | Base de datos, seguridad, búsquedas, ampliación y mediciones |
+| `ai/` | Embeddings, comparación de modelos, migración y RAG |
+| `tests/` | Pruebas SQL |
+| `img/` | Capturas de ejecución |
+| `docs/` | Material de apoyo |
+| `app.py` | Interfaz |
+| `.streamlit/` | Tema visual |
+| `desarrollo.md` | Fases, decisiones, incidencias y resultados |
+
+## Conclusiones y mejoras
+
+Libris permite demostrar el recorrido completo desde una pregunta hasta una respuesta apoyada en datos de SQL Server. Durante el proyecto aprendí a conectar servicios locales, elegir y cambiar un modelo de embeddings, evaluar respuestas y medir una optimización sin perder de vista los resultados.
+
+La interfaz está probada en local. Cada pregunta es independiente, aunque se muestre un historial. Las fuentes son fichas y sinopsis, no libros completos. Recuperar los libros más próximos no garantiza que respondan a cualquier pregunta.
+
+Las pruebas detectaron respuestas útiles, abstenciones correctas y casos mejorables: copia de fichas ante una petición engañosa y abstención en una consulta de ciencia ficción. Queda reforzar y evaluar las instrucciones, revisar la relevancia de las fuentes y completar la publicación de la alternativa de optimización. La aplicación usa la identidad de Windows configurada para la conexión; no implementa acceso individual de socios.
+
+## Ayuda de ChatGPT
+
+Desarrollé el proyecto con apoyo de **ChatGPT, utilizando ChatGPT Plus**, para comprender conceptos, recibir recomendaciones de herramientas, revisar errores, preparar consultas y pruebas, personalizar la interfaz y redactar documentación. Entre las herramientas propuestas durante el acompañamiento estuvieron Ollama, Caddy y Streamlit.
+
+Plus es el plan utilizado; el modelo exacto de cada conversación no quedó registrado. ChatGPT es el asistente de desarrollo; **el modelo que responde dentro de Libris es Qwen2.5:3b**, ejecutado con Ollama. Las propuestas se probaron en mi equipo y se corrigieron cuando no coincidían con el código o los resultados reales.
