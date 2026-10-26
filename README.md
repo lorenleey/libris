@@ -219,4 +219,4 @@ Las pruebas detectaron respuestas útiles, abstenciones correctas y casos mejora
 
 Desarrollé el proyecto con apoyo de **ChatGPT, utilizando ChatGPT Plus**, para comprender conceptos, recibir recomendaciones de herramientas, revisar errores, preparar consultas y pruebas, personalizar la interfaz y redactar documentación. Entre las herramientas propuestas durante el acompañamiento estuvieron Ollama, Caddy y Streamlit.
 
-Plus es el plan utilizado; el modelo exacto de cada conversación no quedó registrado. ChatGPT es el asistente de desarrollo; **el modelo que responde dentro de Libris es Qwen2.5:3b**, ejecutado con Ollama. Las propuestas se probaron en mi equipo y se corrigieron cuando no coincidían con el código o los resultados reales.
+Plus es el plan utilizado; el modelo exacto fue GPT-Sol 6 - Ligero o Medio. ChatGPT es el asistente de desarrollo; **el modelo que responde dentro de Libris es Qwen2.5:3b**, ejecutado con Ollama. Las propuestas se probaron en mi equipo y se corrigieron cuando no coincidían con el código o los resultados reales.
